@@ -12,7 +12,7 @@ metadata:
   name: project-editor-role
 rules:
 - apiGroups:
-  - ops.k8s.project.operator.io
+  - ops.local
   resources:
   - projects
   verbs:
@@ -24,7 +24,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ops.k8s.project.operator.io
+  - ops.local
   resources:
   - projects/status
   verbs:

@@ -1,12 +1,8 @@
-apiVersion: ops.k8s.project.operator.io/v1alpha1
+apiVersion: ops.local/v1alpha1
 kind: Project
 metadata:
-  labels:
-    app.kubernetes.io/name: project
-    app.kubernetes.io/instance: project-sample
-    app.kubernetes.io/part-of: project-operator
-    app.kubernetes.io/managed-by: kustomize
-    app.kubernetes.io/created-by: project-operator
   name: project-sample
 spec:
-  # TODO(user): Add fields here
+  environments:
+    - name: prod
+    - name: stage

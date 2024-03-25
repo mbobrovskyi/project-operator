@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2024 Mykhailo Bobrovskyi.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -34,8 +34,8 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
-	opsv1alpha1 "k8s.project.operator.io/api/v1alpha1"
-	"k8s.project.operator.io/internal/controller"
+	opsv1alpha1 "github.com/mbobrovskyi/project-operator/api/v1alpha1"
+	"github.com/mbobrovskyi/project-operator/internal/controller"
 	//+kubebuilder:scaffold:imports
 )
 
@@ -104,7 +104,7 @@ func main() {
 		WebhookServer:          webhookServer,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "ff6d8240.k8s.project.operator.io",
+		LeaderElectionID:       "88559be4.local",
 		// LeaderElectionReleaseOnCancel defines if the leader should step down voluntarily
 		// when the Manager ends. This requires the binary to immediately end when the
 		// Manager is stopped, otherwise, this setting is unsafe. Setting this significantly

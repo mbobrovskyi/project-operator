@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2024 Mykhailo Bobrovskyi.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	opsv1alpha1 "k8s.project.operator.io/api/v1alpha1"
+	opsv1alpha1 "github.com/mbobrovskyi/project-operator/api/v1alpha1"
 )
 
 var _ = Describe("Project Controller", func() {

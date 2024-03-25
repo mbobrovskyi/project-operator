@@ -1,5 +1,5 @@
 /*
-Copyright 2024.
+Copyright 2024 Mykhailo Bobrovskyi.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"fmt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -28,18 +29,37 @@ type ProjectSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of Project. Edit project_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// +kubebuilder:validation:Required
+	Environments []Environment `json:"environments"`
 }
+
+type Environment struct {
+	// +kubebuilder:validation:Required
+	Name string `json:"name"`
+}
+
+func (e *Environment) NamespaceName(projectName string) string {
+	return fmt.Sprintf("%s-%s", projectName, e.Name)
+}
+
+type ProjectStatusPhase string
+
+const (
+	SuccessProjectStatusPhase = "SUCCESS"
+	ErrorProjectStatusPhase   = "ERROR"
+)
 
 // ProjectStatus defines the observed state of Project
 type ProjectStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+	Phase ProjectStatusPhase `json:"phase"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
+//+kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 
 // Project is the Schema for the projects API
 type Project struct {
