@@ -23,17 +23,24 @@ import (
 	opsv1alpha1 "github.com/mbobrovskyi/project-operator/api/v1alpha1"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"slices"
 )
 
+const ProjectFinalizerName = "ops.local/project"
+
+// Definitions to manage status conditions
 const (
-	finalizerID = "project-operator"
+	// typeAvailableProject represents the status of the Project reconciliation
+	typeAvailableProject = "Available"
+	// typeDegradedProject represents the status used when the custom resource is deleted and the finalizer operations are yet to occur.
+	typeDegradedProject = "Degraded"
 )
 
 // ProjectReconciler reconciles a Project object
@@ -55,59 +62,133 @@ type ProjectReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.17.0/pkg/reconcile
 func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Reconcile called")
+	log := log.FromContext(ctx)
 
+	// Fetch the Project instance
+	// The purpose is check if the Custom Resource for the Kind Project
+	// is applied on the cluster if not we return nil to stop the reconciliation
 	project := &opsv1alpha1.Project{}
-	if err := r.Get(ctx, req.NamespacedName, project); err != nil {
+	err := r.Get(ctx, req.NamespacedName, project)
+	if err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	if !project.ObjectMeta.DeletionTimestamp.IsZero() {
-		logger.Info("Project marked for deletion")
+	// Let's just set the status as Unknown when no status is available
+	if len(project.Status.Conditions) == 0 {
+		meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+			Type:    typeAvailableProject,
+			Status:  metav1.ConditionUnknown,
+			Reason:  "Reconciling",
+			Message: "Starting reconciliation",
+		})
+		if err = r.Status().Update(ctx, project); err != nil {
+			log.Error(err, "Failed to update Project status")
+			return ctrl.Result{}, err
+		}
 
-		if slices.Contains(project.ObjectMeta.Finalizers, finalizerID) {
-			if err := r.deleteNamespaces(ctx, project); err != nil {
-				return ctrl.Result{}, fmt.Errorf("could not delete namespaces: %w", err)
+		// Let's re-fetch the project Custom Resource after updating the status
+		// so that we have the latest state of the resource on the cluster and we will avoid
+		// raising the error "the object has been modified, please apply
+		// your changes to the latest version and try again" which would re-trigger the reconciliation
+		// if we try to update it again in the following operations
+		if err = r.Get(ctx, req.NamespacedName, project); err != nil {
+			log.Error(err, "Failed to re-fetch project")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Let's add a finalizer. Then, we can define some operations which should
+	// occur before the custom resource to be deleted.
+	// More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers
+	if !controllerutil.ContainsFinalizer(project, ProjectFinalizerName) {
+		log.Info("Adding Finalizer for Project")
+		if ok := controllerutil.AddFinalizer(project, ProjectFinalizerName); !ok {
+			log.Error(err, "Failed to add finalizer into the custom resource")
+			return ctrl.Result{Requeue: true}, nil
+		}
+
+		if err = r.Update(ctx, project); err != nil {
+			log.Error(err, "Failed to update custom resource to add finalizer")
+			return ctrl.Result{}, err
+		}
+	}
+
+	if project.GetDeletionTimestamp() != nil {
+		if controllerutil.ContainsFinalizer(project, ProjectFinalizerName) {
+			log.Info("Performing Finalizer Operations for Project before delete CR")
+
+			// Let's add here a status "Downgrade" to reflect that this resource began its process to be terminated.
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{Type: typeDegradedProject,
+				Status: metav1.ConditionUnknown, Reason: "Finalizing",
+				Message: fmt.Sprintf("Performing finalizer operations for the custom resource: %s ", project.Name)})
+
+			if err = r.Status().Update(ctx, project); err != nil {
+				log.Error(err, "Failed to update Project status")
+				return ctrl.Result{}, err
 			}
 
-			// Remove our finalizer from the list and update it.
-			project.ObjectMeta.Finalizers = slices.DeleteFunc(project.ObjectMeta.Finalizers, func(s string) bool {
-				return s == finalizerID
+			if err = r.deleteNamespaces(ctx, project); err != nil {
+				log.Error(err, "Failed to delete namespaces")
+				return ctrl.Result{Requeue: true}, nil
+			}
+
+			if err = r.Get(ctx, req.NamespacedName, project); err != nil {
+				log.Error(err, "Failed to re-fetch project")
+				return ctrl.Result{}, err
+			}
+
+			meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+				Type:    typeDegradedProject,
+				Status:  metav1.ConditionTrue,
+				Reason:  "Finalizing",
+				Message: fmt.Sprintf("Finalizer operations for custom resource %s name were successfully accomplished", project.Name),
 			})
 
-			if err := r.Update(ctx, project); err != nil {
-				return ctrl.Result{}, fmt.Errorf("could not remove finalizer: %w", err)
+			if err = r.Status().Update(ctx, project); err != nil {
+				log.Error(err, "Failed to update Project status")
+				return ctrl.Result{}, err
+			}
+
+			log.Info("Removing Finalizer for Project after successfully perform the operations")
+			if ok := controllerutil.RemoveFinalizer(project, ProjectFinalizerName); !ok {
+				log.Error(err, "Failed to remove finalizer for Project")
+				return ctrl.Result{Requeue: true}, nil
+			}
+
+			if err = r.Update(ctx, project); err != nil {
+				log.Error(err, "Failed to remove finalizer for Project")
+				return ctrl.Result{}, err
 			}
 		}
 
 		return ctrl.Result{}, nil
 	}
 
-	// register our finalizer if it does not exist
-	if !slices.Contains(project.ObjectMeta.Finalizers, finalizerID) {
-		project.ObjectMeta.Finalizers = append(project.ObjectMeta.Finalizers, finalizerID)
-		if err := r.Update(ctx, project); err != nil {
-			return ctrl.Result{}, fmt.Errorf("could not add finalizer: %w", err)
-		}
-	}
-
-	if err := r.createNamespaces(ctx, project); err != nil {
-		project.Status.Phase = opsv1alpha1.ErrorProjectStatusPhase
-
+	if err = r.createNamespaces(ctx, project); err != nil {
 		return ctrl.Result{}, goerrors.Join(err, r.Status().Update(ctx, project))
 	}
 
-	if err := r.Status().Update(ctx, project); err != nil {
-		return ctrl.Result{}, fmt.Errorf("could not update status: %w", err)
+	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
+		Type:    typeAvailableProject,
+		Status:  metav1.ConditionUnknown,
+		Reason:  "Reconciling",
+		Message: fmt.Sprintf("Custom resource %s created successfully", project.Name),
+	})
+
+	if err = r.Status().Update(ctx, project); err != nil {
+		log.Error(err, "Failed to update Project status")
+		return ctrl.Result{}, err
+	}
+
+	if err = r.Status().Update(ctx, project); err != nil {
+		log.Error(err, "Failed to update Project status")
+		return ctrl.Result{}, err
 	}
 
 	return ctrl.Result{}, nil
 }
 
 func (r *ProjectReconciler) createNamespaces(ctx context.Context, project *opsv1alpha1.Project) error {
-	logger := log.FromContext(ctx)
-
 	for _, environment := range project.Spec.Environments {
 		namespaceName := environment.NamespaceName(project.Name)
 
@@ -119,40 +200,34 @@ func (r *ProjectReconciler) createNamespaces(ctx context.Context, project *opsv1
 						Name: namespaceName,
 					},
 				}
-				if err := r.Create(ctx, newNamespace); err != nil {
+				if err = r.Create(ctx, newNamespace); err != nil {
 					return err
 				}
-
-				logger.Info("Namespace created", "namespace", namespaceName)
 			} else {
 				return err
 			}
 		}
-
-		project.Status.Phase = opsv1alpha1.SuccessProjectStatusPhase
 	}
 
 	return nil
 }
 
 func (r *ProjectReconciler) deleteNamespaces(ctx context.Context, project *opsv1alpha1.Project) error {
-	logger := log.FromContext(ctx)
-
 	for _, environment := range project.Spec.Environments {
 		namespaceName := environment.NamespaceName(project.Name)
 
 		existingNamespace := &v1.Namespace{}
-		if err := r.Get(ctx, types.NamespacedName{Name: namespaceName}, existingNamespace); err != nil {
-			if !errors.IsNotFound(err) {
-				return err
+		err := r.Get(ctx, types.NamespacedName{Name: namespaceName}, existingNamespace)
+		if err != nil {
+			if errors.IsNotFound(err) {
+				continue
 			}
-		}
-
-		if err := r.Delete(ctx, existingNamespace); err != nil {
 			return err
 		}
 
-		logger.Info("Namespace deleted", "namespace", namespaceName)
+		if err = r.Delete(ctx, existingNamespace); err != nil {
+			return err
+		}
 	}
 
 	return nil

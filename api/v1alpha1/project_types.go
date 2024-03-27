@@ -42,24 +42,16 @@ func (e *Environment) NamespaceName(projectName string) string {
 	return fmt.Sprintf("%s-%s", projectName, e.Name)
 }
 
-type ProjectStatusPhase string
-
-const (
-	SuccessProjectStatusPhase = "SUCCESS"
-	ErrorProjectStatusPhase   = "ERROR"
-)
-
 // ProjectStatus defines the observed state of Project
 type ProjectStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	Phase ProjectStatusPhase `json:"phase"`
+	Conditions []metav1.Condition `json:"conditions,omitempty" patchStrategy:"merge" patchMergeKey:"type" protobuf:"bytes,1,rep,name=conditions"`
 }
 
 //+kubebuilder:object:root=true
 //+kubebuilder:subresource:status
 //+kubebuilder:resource:scope=Cluster
-// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 
 // Project is the Schema for the projects API
 type Project struct {
