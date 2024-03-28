@@ -170,7 +170,7 @@ func (r *ProjectReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	meta.SetStatusCondition(&project.Status.Conditions, metav1.Condition{
 		Type:    typeAvailableProject,
-		Status:  metav1.ConditionUnknown,
+		Status:  metav1.ConditionTrue,
 		Reason:  "Reconciling",
 		Message: fmt.Sprintf("Custom resource %s created successfully", project.Name),
 	})
